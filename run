@@ -1,0 +1,104 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+cd "$(dirname "$0")"
+
+rm -rf -- bin
+mkdir -p -- bin
+
+echo >bin/source
+echo >bin/sh
+echo >bin/bash
+echo >bin/perl
+echo >bin/node
+echo >bin/python2.7
+echo >bin/python3.6
+gcc -O2 -m32 -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/c32 -x c c
+gcc -O2 -m64 -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/c64 -x c c
+g++ -O2 -m32 -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/cpp32 -x c++ cpp
+g++ -O2 -m64 -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/cpp64 -x c++ cpp
+javac -d bin -g:none java.java
+mcs -optimize+ -out:bin/csharp csharp.cs
+
+declare -ri iter=5000
+
+function now {
+	node -p '+new Date'
+}
+
+function burn {
+	# Get CPU to full speed (speedstep/turbo)
+	local -ir t1=$(now)+2000
+	while (( $(now) < t1 )); do
+		:
+	done
+}
+
+function measure {
+	set -e
+	local -r cmd="$1"
+	local -i t1
+	local -i t2
+	local -i dt
+	local -i x
+	# Run once to prime cache
+	$cmd
+	# Measure
+	t1=$(now)
+	for ((x=0; x<iter; x++)); do
+		$cmd
+	done
+	t2=$(now)
+	let dt=t2-t1
+	echo "$dt"
+}
+
+function main {
+	burn
+
+	# Measure no-op for the lulz
+	measure : >/dev/null
+
+	# Measure dumb fork-exec'd program for reference
+	local -ri ref="$(measure /bin/true)"
+	local prog
+	local cmd
+	local -i res
+	local desc
+	local progbase
+
+	printf "%s\t%s\t%s\n" 'Test' 'Time (ms/run)' 'Relative'
+
+	# Benchmark
+	for prog in : /bin/true ./bin/*; do
+		progbase="$(basename "$prog")"
+		desc="$progbase"
+		case "$progbase" in
+		c*)
+			cmd="$prog"
+			;;
+		Java.class)
+			cmd="java -cp bin Java"
+			desc='java'
+			;;
+		:)
+			cmd="$prog"
+			desc='no-op'
+			;;
+		true)
+			cmd="$prog"
+			desc='reference'
+			;;
+		*)
+			cmd="$progbase $prog"
+			;;
+		esac
+		let res="$(measure "$cmd")"
+		printf "%s\t%1.2f\t%1.3f\n" "$desc" "$(echo "($res-$ref)/$iter" | bc -l)" "$(echo "$res/$ref" | bc -l)"
+	done
+}
+
+grep -Ei '^(processor|model name|bogomips)\s*:' /proc/cpuinfo > cpuinfo.txt
+
+main | tee results.tsv | column -ts$'\t'

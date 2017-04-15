@@ -1,0 +1,24 @@
+processor	: 0
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4390.22
+processor	: 1
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4398.81
+processor	: 2
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4398.66
+processor	: 3
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4397.53
+processor	: 4
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4397.54
+processor	: 5
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4398.57
+processor	: 6
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4398.52
+processor	: 7
+model name	: Intel(R) Core(TM) i7-4702MQ CPU @ 2.20GHz
+bogomips	: 4398.37
