@@ -2,6 +2,10 @@
 
 set -Eeuo pipefail
 
+declare -ri iter=5000
+
+sudo renice -n -15 -p "$$"
+
 cd "$(dirname "$0")"
 
 rm -rf -- bin
@@ -21,8 +25,6 @@ g++ -O2 -m64 -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/cpp
 javac -d bin -g:none java.java
 mcs -optimize+ -out:bin/csharp csharp.cs
 
-declare -ri iter=5000
-
 function now {
 	node -p '+new Date'
 }
@@ -37,13 +39,16 @@ function burn {
 
 function measure {
 	set -e
+	taskset -ap 0xFFFF $$ &>/dev/null
 	local -r cmd="$1"
 	local -i t1
 	local -i t2
 	local -i dt
 	local -i x
-	# Run once to prime cache
-	$cmd
+	# Run a few times before clocking, to prime cache
+	for ((x=0; x < 10; x++)); do
+		$cmd
+	done
 	# Measure
 	t1=$(now)
 	for ((x=0; x<iter; x++)); do
@@ -54,26 +59,54 @@ function measure {
 	echo "$dt"
 }
 
+function measure1 {
+	taskset -ap 0x0001 $$ &>/dev/null
+	measure "$@"
+	taskset -ap 0xFFFF $$ &>/dev/null
+}
+
+function ram {
+	set -e
+	local -r cmd="$1"
+	local -ri count=30
+	local -i sum=0
+	for ((x=0; x<count; x++)); do
+		let sum+="$("$(which time)" -f '%M' -- $cmd 2>&1)"
+	done
+	echo "$((sum / count))"
+}
+
 function main {
 	burn
 
-	# Measure no-op for the lulz
-	measure : >/dev/null
+	gcc -O2 -m64 -masm=intel -s -ffunction-sections -fdata-sections -Wl,--gc-sections -o bin/cpuspeed cpuspeed.S cpuspeed.c
+	local -ir cpuspeed="$(sudo taskset 0x01 ./bin/cpuspeed 2>/dev/null)"
+	rm -f -- bin/cpuspeed
+
+	printf "CPU speed: %s Hz\n\n" "$cpuspeed" | tee cpuinfo.txt >&2
+	grep -Ei '^(processor|model name|bogomips)\s*:' /proc/cpuinfo >> cpuinfo.txt
+
 
 	# Measure dumb fork-exec'd program for reference
-	local -ri ref="$(measure /bin/true)"
 	local prog
 	local cmd
-	local -i res
+	local -i tmulti
+	local -i tsingle
+	local -i mem
 	local desc
 	local progbase
+	local -i normal
 
-	printf "%s\t%s\t%s\n" 'Test' 'Time (ms/run)' 'Relative'
+	local -ri ref="$(measure /bin/true)"
+
+	printf "%s\t" 'Test' 'RAM usage (MB)' 'ms/run, multi-core' 'relative, multi-core' 'ms/run, single-core' 'relative, single-core'
+	printf "\n"
 
 	# Benchmark
 	for prog in : /bin/true ./bin/*; do
 		progbase="$(basename "$prog")"
 		desc="$progbase"
+		normal=1
 		case "$progbase" in
 		c*)
 			cmd="$prog"
@@ -85,20 +118,37 @@ function main {
 		:)
 			cmd="$prog"
 			desc='no-op'
+			normal=0
 			;;
 		true)
 			cmd="$prog"
 			desc='reference'
 			;;
+		source)
+			normal=0
+			desc='sourced script'
+			;&
 		*)
 			cmd="$progbase $prog"
 			;;
 		esac
-		let res="$(measure "$cmd")"
-		printf "%s\t%1.2f\t%1.3f\n" "$desc" "$(echo "($res-$ref)/$iter" | bc -l)" "$(echo "$res/$ref" | bc -l)"
+		let tmulti="$(measure "$cmd")" || true
+		printf "%s\t" "$desc"
+		if (( normal )); then
+			let mem="$(ram "$cmd")" || true
+			let tsingle="$(measure1 "$cmd")" || true
+			printf -- "%1.1f\t" "$(echo "$mem/1024" | bc -l )"
+			printf -- "%1.2f\t%1.3f\t" "$(echo "$tmulti/$iter" | bc -l)" "$(echo "$tmulti/$ref" | bc -l)"
+			printf -- "%1.2f\t%1.3f\t" "$(echo "$tsingle/$iter" | bc -l)" "$(echo "$tsingle/$ref" | bc -l)"
+		else
+			let mem=0 || true
+			let tsingle=0 || true
+			printf -- "%s\t" '-'
+			printf -- "%1.2f\t%1.3f\t" "$(echo "$tmulti/$iter" | bc -l)" "$(echo "$tmulti/$ref" | bc -l)"
+			printf -- "%s\t%s\t" '-' '-'
+		fi
+		printf -- "\n"
 	done
 }
-
-grep -Ei '^(processor|model name|bogomips)\s*:' /proc/cpuinfo > cpuinfo.txt
 
 main | tee results.tsv | column -ts$'\t'
